@@ -28,6 +28,7 @@ import {
 	default as InsertionPoint,
 } from './insertion-point';
 import BlockToolbarPopover from './block-toolbar-popover';
+import BlockContextMenu from '../block-context-menu';
 import { store as blockEditorStore } from '../../store';
 import usePopoverScroll from '../block-popover/use-popover-scroll';
 import ZoomOutModeInserters from './zoom-out-mode-inserters';
@@ -320,6 +321,10 @@ export default function BlockTools( {
 						isTyping={ isTyping }
 					/>
 				) }
+
+				<BlockContextMenu
+					__unstableContentRef={ __unstableContentRef }
+				/>
 
 				{ /* Used for the inline rich text toolbar. Until this toolbar is combined into BlockToolbar, someone implementing their own BlockToolbar will also need to use this to see the image caption toolbar. */ }
 				{ ! isZoomOutMode && ! hasFixedToolbar && (

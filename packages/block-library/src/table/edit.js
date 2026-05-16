@@ -16,6 +16,7 @@ import {
 import {
 	InspectorControls,
 	BlockControls,
+	BlockContextMenuControls,
 	RichText,
 	BlockIcon,
 	AlignmentControl,
@@ -27,6 +28,8 @@ import {
 import { __, _x } from '@wordpress/i18n';
 import {
 	Button,
+	MenuGroup,
+	MenuItem,
 	Placeholder,
 	TextControl,
 	ToggleControl,
@@ -40,6 +43,8 @@ import {
 	alignRight,
 	alignCenter,
 	blockTable as icon,
+	check,
+	chevronLeft,
 	tableColumnAfter,
 	tableColumnBefore,
 	tableColumnDelete,
@@ -105,6 +110,7 @@ function TableEdit( {
 	setAttributes,
 	insertBlocksAfter,
 	isSelected: isSingleSelected,
+	clientId,
 } ) {
 	const { hasFixedLayout, head, foot } = attributes;
 	const [ initialRowCount, setInitialRowCount ] = useState( 2 );
@@ -470,6 +476,248 @@ function TableEdit( {
 							controls={ tableControls }
 						/>
 					</BlockControls>
+					<BlockContextMenuControls>
+						{ ( {
+							clientIds: targetClientIds,
+							view,
+							setView,
+							onClose,
+						} ) => {
+							// Only show table-specific items when the right-click
+							// targets THIS table (one fill is registered per
+							// table block in the document).
+							if (
+								targetClientIds?.length !== 1 ||
+								targetClientIds[ 0 ] !== clientId
+							) {
+								return null;
+							}
+							const noCell = ! selectedCell;
+							const currentAlign = getCellAlignment();
+							function run( fn ) {
+								return () => {
+									fn();
+									onClose();
+								};
+							}
+							function setAlign( align ) {
+								return () => {
+									onChangeColumnAlignment(
+										currentAlign === align
+											? undefined
+											: align
+									);
+									onClose();
+								};
+							}
+							const backButton = (
+								<MenuGroup>
+									<Button
+										__next40pxDefaultSize
+										className="block-editor-block-context-menu__back"
+										icon={ chevronLeft }
+										onClick={ () => setView( 'main' ) }
+									>
+										{ __( 'Back' ) }
+									</Button>
+								</MenuGroup>
+							);
+
+							if ( view === 'table-row-edit' ) {
+								return (
+									<>
+										{ backButton }
+										<MenuGroup label={ __( 'Row edit' ) }>
+											<MenuItem
+												disabled={ noCell }
+												accessibleWhenDisabled
+												onClick={ run(
+													onInsertRowBefore
+												) }
+											>
+												{ __( 'Insert row above' ) }
+											</MenuItem>
+											<MenuItem
+												disabled={ noCell }
+												accessibleWhenDisabled
+												onClick={ run(
+													onInsertRowAfter
+												) }
+											>
+												{ __( 'Insert row below' ) }
+											</MenuItem>
+											<MenuItem
+												disabled={ noCell }
+												accessibleWhenDisabled
+												isDestructive
+												onClick={ run( onDeleteRow ) }
+											>
+												{ __( 'Delete row' ) }
+											</MenuItem>
+										</MenuGroup>
+									</>
+								);
+							}
+
+							if ( view === 'table-column-edit' ) {
+								return (
+									<>
+										{ backButton }
+										<MenuGroup
+											label={ __( 'Column edit' ) }
+										>
+											<MenuItem
+												disabled={ noCell }
+												accessibleWhenDisabled
+												onClick={ run(
+													onInsertColumnBefore
+												) }
+											>
+												{ __( 'Insert column before' ) }
+											</MenuItem>
+											<MenuItem
+												disabled={ noCell }
+												accessibleWhenDisabled
+												onClick={ run(
+													onInsertColumnAfter
+												) }
+											>
+												{ __( 'Insert column after' ) }
+											</MenuItem>
+											<MenuItem
+												disabled={ noCell }
+												accessibleWhenDisabled
+												isDestructive
+												onClick={ run(
+													onDeleteColumn
+												) }
+											>
+												{ __( 'Delete column' ) }
+											</MenuItem>
+										</MenuGroup>
+									</>
+								);
+							}
+
+							if ( view === 'table-alignment' ) {
+								return (
+									<>
+										{ backButton }
+										<MenuGroup label={ __( 'Alignment' ) }>
+											<MenuItem
+												role="menuitemradio"
+												disabled={ noCell }
+												accessibleWhenDisabled
+												isSelected={
+													currentAlign === 'left'
+												}
+												icon={
+													currentAlign === 'left'
+														? check
+														: null
+												}
+												onClick={ setAlign( 'left' ) }
+											>
+												{ __( 'Align left' ) }
+											</MenuItem>
+											<MenuItem
+												role="menuitemradio"
+												disabled={ noCell }
+												accessibleWhenDisabled
+												isSelected={
+													currentAlign === 'center'
+												}
+												icon={
+													currentAlign === 'center'
+														? check
+														: null
+												}
+												onClick={ setAlign( 'center' ) }
+											>
+												{ __( 'Align center' ) }
+											</MenuItem>
+											<MenuItem
+												role="menuitemradio"
+												disabled={ noCell }
+												accessibleWhenDisabled
+												isSelected={
+													currentAlign === 'right'
+												}
+												icon={
+													currentAlign === 'right'
+														? check
+														: null
+												}
+												onClick={ setAlign( 'right' ) }
+											>
+												{ __( 'Align right' ) }
+											</MenuItem>
+										</MenuGroup>
+									</>
+								);
+							}
+
+							if ( view !== 'main' ) {
+								return null;
+							}
+
+							return (
+								<MenuGroup>
+									<MenuItem
+										disabled={ noCell }
+										accessibleWhenDisabled
+										onClick={ () =>
+											setView( 'table-row-edit' )
+										}
+									>
+										{ __( 'Row edit ▸' ) }
+									</MenuItem>
+									<MenuItem
+										disabled={ noCell }
+										accessibleWhenDisabled
+										onClick={ () =>
+											setView( 'table-column-edit' )
+										}
+									>
+										{ __( 'Column edit ▸' ) }
+									</MenuItem>
+									<MenuItem
+										disabled={ noCell }
+										accessibleWhenDisabled
+										onClick={ () =>
+											setView( 'table-alignment' )
+										}
+									>
+										{ __( 'Alignment ▸' ) }
+									</MenuItem>
+									<MenuItem
+										role="menuitemcheckbox"
+										isSelected={
+											!! ( head && head.length )
+										}
+										icon={
+											head && head.length ? check : null
+										}
+										onClick={ run( onToggleHeaderSection ) }
+									>
+										{ __( 'Show Header Row' ) }
+									</MenuItem>
+									<MenuItem
+										role="menuitemcheckbox"
+										isSelected={
+											!! ( foot && foot.length )
+										}
+										icon={
+											foot && foot.length ? check : null
+										}
+										onClick={ run( onToggleFooterSection ) }
+									>
+										{ __( 'Show Footer Row' ) }
+									</MenuItem>
+								</MenuGroup>
+							);
+						} }
+					</BlockContextMenuControls>
 				</>
 			) }
 			<InspectorControls>
