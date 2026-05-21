@@ -153,6 +153,14 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 			if ( popoverRef.current?.contains( event.target ) ) {
 				return;
 			}
+			// Right-button mousedowns are paired with a contextmenu event
+			// just after. `handleContextMenu` reads `popoverRef.current` to
+			// decide whether to keep the menu, close it (second right-click
+			// → native menu fall-through), or open a fresh one. Closing here
+			// would break that detection.
+			if ( event.type === 'mousedown' && event.button === 2 ) {
+				return;
+			}
 			close();
 		}
 		doc.addEventListener( 'mousedown', dismiss, true );
@@ -176,9 +184,20 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 		let installedHandler = null;
 
 		function handleContextMenu( event ) {
-			// Shift + right-click bypasses the custom menu so users can still
-			// reach the browser's native menu (spell-check, "Search …", etc.)
-			// when the cursor is inside RichText.
+			// A second right-click while the menu is already open falls
+			// through to the browser's native menu — useful for reaching
+			// spell-check / "Search …" / etc. without first dismissing the
+			// menu by other means. The mousedown dismiss handler skips
+			// right-button events so the popover is still mounted at this
+			// point and `popoverRef.current` is truthy.
+			if ( popoverRef.current ) {
+				setState( null );
+				setView( 'main' );
+				return;
+			}
+
+			// Shift + right-click also bypasses the custom menu — same
+			// reasoning, but works on the first right-click too.
 			if ( event.shiftKey ) {
 				return;
 			}

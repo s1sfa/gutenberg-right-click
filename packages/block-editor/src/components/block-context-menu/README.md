@@ -1,6 +1,6 @@
 # BlockContextMenu
 
-Renders a custom context (right-click) menu over the block editor canvas. The menu only appears when the user right-clicks **inside** a block; right-clicks on canvas chrome, in gaps between blocks, or outside the canvas entirely fall through to the browser's native menu. Holding Shift while right-clicking always falls through to the native menu — useful for reaching spell-check inside a `RichText` field.
+Renders a custom context (right-click) menu over the block editor canvas. The menu only appears when the user right-clicks **inside** a block; right-clicks on canvas chrome, in gaps between blocks, or outside the canvas entirely fall through to the browser's native menu. Holding Shift while right-clicking always falls through to the native menu — useful for reaching spell-check inside a `RichText` field. A second right-click while the custom menu is open also falls through: the first right-click opens the custom menu, the second one closes it and shows the browser's native menu in place.
 
 The component is mounted internally by `BlockTools` and is not exported from `@wordpress/block-editor`. Plugins extend it through the [`BlockContextMenuControls`](../block-context-menu-controls/README.md) slot.
 
@@ -250,7 +250,7 @@ The anchor object passed to `<Popover anchor={…} />` is rebuilt via `getCursor
 
 ### Known UX trade-offs
 
--   The custom menu replaces the browser's native context menu **inside `RichText` fields**, removing the spell-check / "Search Google for…" entries from the default context. **Shift + right-click** is the documented escape hatch (matching Firefox's own convention for bypassing custom context menus).
+-   The custom menu replaces the browser's native context menu **inside `RichText` fields**, removing the spell-check / "Search Google for…" entries from the default context. **Shift + right-click** is the documented escape hatch (matching Firefox's own convention for bypassing custom context menus). A **second right-click while the custom menu is open** is also recognized as a fall-through: the menu closes and the next right-click event reaches the browser unchanged.
 -   Async `navigator.clipboard.read` may prompt for permission in some Firefox configurations on first use; the `Paste` items are best-effort and show an error notice on failure.
 -   Inline paste relies on `execCommand`, which is marked deprecated. No browser has announced removal, and it remains the only insertion path that triggers the `input` events `RichText` listens for. If the API is eventually removed, the inline paste path will need to move to a `paste` event the iframe doc dispatches itself.
 
@@ -277,7 +277,7 @@ Open `http://localhost:8888/wp-admin/post-new.php`, then repeat in the site edit
 12. Group / Lock / Rename / Visibility / Create pattern do **not** appear in the right-click menu (still in the block kebab menu).
 13. Right-click on a locked block (`canRemove === false`) → **Delete Block** is hidden / disabled per `BlockActions` capability flags.
 14. Multi-select two blocks, right-click on one of them → menu treats both as the target (Copy Blocks copies both; Delete Blocks removes both); right-click on a different block → multi-selection collapses to that single block.
-15. **Shift + right-click** anywhere in the canvas → browser's native menu shows (escape hatch for spell-check inside RichText).
+15. **Shift + right-click** anywhere in the canvas → browser's native menu shows (escape hatch for spell-check inside RichText). **Right-click a second time while the menu is open** → custom menu closes and the browser's native menu shows in its place.
 16. **Escape** with the menu open → menu closes; click outside → menu closes; **left-click on a block** while the menu is open → menu closes; **type into a block** while the menu is open → menu closes.
 
 Automated:
