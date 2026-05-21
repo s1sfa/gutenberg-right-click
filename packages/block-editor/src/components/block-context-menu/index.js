@@ -38,7 +38,6 @@ import BlockModeToggle from '../block-settings-menu/block-mode-toggle';
 import QuickInserter from '../inserter/quick-inserter';
 import ParagraphContextMenuFills from './paragraph-fills';
 import PasteNewBlockSubmenu from './paste-new-block-submenu';
-import SpellCheckPopover from './spell-check-popover';
 import TextColorPopover from './text-color-popover';
 import { store as blockEditorStore } from '../../store';
 import { getBlockClientId } from '../../utils/dom';
@@ -104,7 +103,6 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 	const [ state, setState ] = useState( null );
 	const [ view, setView ] = useState( 'main' );
 	const [ inserterState, setInserterState ] = useState( null );
-	const [ spellCheckState, setSpellCheckState ] = useState( null );
 	const [ colorPickerState, setColorPickerState ] = useState( null );
 	const popoverRef = useRef( null );
 	const { selectBlock, clearSelectedBlock, replaceBlock } =
@@ -129,7 +127,6 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 	}, [] );
 
 	const closeInserter = useCallback( () => setInserterState( null ), [] );
-	const closeSpellCheck = useCallback( () => setSpellCheckState( null ), [] );
 	const closeColorPicker = useCallback(
 		() => setColorPickerState( null ),
 		[]
@@ -251,7 +248,6 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 
 			setView( 'main' );
 			setInserterState( null );
-			setSpellCheckState( null );
 			setColorPickerState( null );
 			setState( {
 				clientIds: targetClientIds,
@@ -314,17 +310,6 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 			inserterState.clientY
 		);
 	}, [ inserterState ] );
-
-	const spellCheckAnchor = useMemo( () => {
-		if ( ! spellCheckState ) {
-			return null;
-		}
-		return getCursorAnchor(
-			spellCheckState.ownerDocument,
-			spellCheckState.clientX,
-			spellCheckState.clientY
-		);
-	}, [ spellCheckState ] );
 
 	const colorPickerAnchor = useMemo( () => {
 		if ( ! colorPickerState ) {
@@ -429,25 +414,6 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 	}, [ splitSlices ] );
 	const canSplitBlock = !! splitSlices;
 
-	// Spell-check writes back through the block's top-level `content`
-	// attribute, so only enable it for single-block targets whose type
-	// declares a RichText-backed `content` attribute (paragraph, heading,
-	// quote, preformatted, list-item, verse, code, …). Blocks that store
-	// their text elsewhere (button `text`, image `caption`, table `body`)
-	// would receive a stray `content` attribute their save path ignores.
-	const canSpellCheckTarget = useMemo( () => {
-		if ( ! state || state.clientIds.length !== 1 ) {
-			return false;
-		}
-		const block = getBlock( state.clientIds[ 0 ] );
-		if ( ! block ) {
-			return false;
-		}
-		const contentSpec = getBlockType( block.name )?.attributes?.content;
-		const source = contentSpec?.source;
-		return source === 'html' || source === 'rich-text';
-	}, [ state, getBlock ] );
-
 	const inserterPopover = inserterState && (
 		<Popover
 			anchor={ inserterAnchor }
@@ -466,16 +432,6 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 		</Popover>
 	);
 
-	const spellCheckPopover = spellCheckState && (
-		<SpellCheckPopover
-			clientId={ spellCheckState.clientId }
-			text={ spellCheckState.text }
-			range={ spellCheckState.range }
-			anchor={ spellCheckAnchor }
-			onClose={ closeSpellCheck }
-		/>
-	);
-
 	const colorPickerPopover = colorPickerState && (
 		<TextColorPopover
 			anchor={ colorPickerAnchor }
@@ -490,7 +446,6 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 		return (
 			<>
 				{ inserterPopover }
-				{ spellCheckPopover }
 				{ colorPickerPopover }
 			</>
 		);
@@ -616,24 +571,6 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 			clientId: targetClientId,
 			rootClientId,
 			isAppender,
-			clientX: state.clientX,
-			clientY: state.clientY,
-			ownerDocument: state.ownerDocument,
-		} );
-		close();
-	}
-
-	function openSpellCheck() {
-		// Disabled in the UI when there's no highlighted text, but guard
-		// here too so accidental keyboard activation can't open an empty
-		// session.
-		if ( ! selectionText || ! range ) {
-			return;
-		}
-		setSpellCheckState( {
-			clientId: firstTargetClientId,
-			text: selectionText,
-			range,
 			clientX: state.clientX,
 			clientY: state.clientY,
 			ownerDocument: state.ownerDocument,
@@ -816,24 +753,14 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 											{ __( 'Paste as new block ▸' ) }
 										</MenuItem>
 									</MenuGroup>
-									<MenuGroup label={ __( 'Tools' ) }>
-										<MenuItem
-											disabled={
-												! hasTextSelection ||
-												! canSpellCheckTarget
-											}
-											accessibleWhenDisabled
-											onClick={ openSpellCheck }
-										>
-											{ __( 'Check spelling' ) }
-										</MenuItem>
-										{ isSingleBlock && (
+									{ isSingleBlock && (
+										<MenuGroup label={ __( 'Tools' ) }>
 											<BlockModeToggle
 												clientId={ firstTargetClientId }
 												onToggle={ close }
 											/>
-										) }
-									</MenuGroup>
+										</MenuGroup>
+									) }
 								</>
 							) }
 							{ /* Block-specific items and plugin extensions

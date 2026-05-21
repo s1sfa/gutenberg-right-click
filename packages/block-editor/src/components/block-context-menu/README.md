@@ -6,14 +6,14 @@ The component is mounted internally by `BlockTools` and is not exported from `@w
 
 ## Items
 
-| Group          | Items                                                        | Notes                                                                                                                                                                                                                                                         |
-| -------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Blocks ▸       | Add block above…, Add block below…, Duplicate, Split block ▸ | View-swap submenu. Add above/below open the [`QuickInserter`](../inserter/quick-inserter.js) popover so the user picks the block type before insertion. `Split block ▸` opens a block-type picker — see below.                                                |
-| Clipboard      | Copy Text / Copy Blocks (dynamic), Paste                     | Label switches with target: a single-block menu reads "Copy Text" (disabled with no highlight); a multi-selection menu reads "Copy Blocks". Paste = inline at the cursor.                                                                                     |
-| Paste special  | Paste as plain text, Paste as new block ▸                    | Plain text inserts inline; `Paste as new block` opens a submenu with typed block variants (see below).                                                                                                                                                        |
-| Tools          | Check spelling, Edit as HTML / Edit visually                 | Check spelling sends the highlighted text to LanguageTool (disabled when no text is highlighted). Edit as HTML reuses [`BlockModeToggle`](../block-settings-menu/block-mode-toggle.js); the label flips to "Edit visually" in HTML mode.                      |
-| Block-specific | Per-block items via the slot                                 | Paragraph: **Bold / Italic / Inline code** (toggle via `toggleFormat`) and **Font color…** (opens the tabbed text/background color popover — see below). Table: **Row edit ▸ / Column edit ▸ / Alignment ▸ / Show Header Row / Show Footer Row** (see below). |
-| Destructive    | Delete Block / Delete Blocks (dynamic)                       | `BlockActions.onRemove`. Label switches with target count.                                                                                                                                                                                                    |
+| Group          | Items                                                        | Notes                                                                                                                                                                                                                                                                                                |
+| -------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blocks ▸       | Add block above…, Add block below…, Duplicate, Split block ▸ | View-swap submenu. Add above/below open the [`QuickInserter`](../inserter/quick-inserter.js) popover so the user picks the block type before insertion. `Split block ▸` opens a block-type picker — see below.                                                                                       |
+| Clipboard      | Copy Text / Copy Blocks (dynamic), Paste                     | Label switches with target: a single-block menu reads "Copy Text" (disabled with no highlight); a multi-selection menu reads "Copy Blocks". Paste = inline at the cursor.                                                                                                                            |
+| Paste special  | Paste as plain text, Paste as new block ▸                    | Plain text inserts inline; `Paste as new block` opens a submenu with typed block variants (see below).                                                                                                                                                                                               |
+| Tools          | Edit as HTML / Edit visually                                 | Reuses [`BlockModeToggle`](../block-settings-menu/block-mode-toggle.js); the label flips to "Edit visually" in HTML mode. Spell-check is intentionally **not** exposed here — use Shift+right-click (or right-click a second time) to reach the browser's native spell-check menu inside `RichText`. |
+| Block-specific | Per-block items via the slot                                 | Paragraph: **Bold / Italic / Inline code** (toggle via `toggleFormat`) and **Font color…** (opens the tabbed text/background color popover — see below). Table: **Row edit ▸ / Column edit ▸ / Alignment ▸ / Show Header Row / Show Footer Row** (see below).                                        |
+| Destructive    | Delete Block / Delete Blocks (dynamic)                       | `BlockActions.onRemove`. Label switches with target count.                                                                                                                                                                                                                                           |
 
 The capability flags (`canInsertBlock`, `canDuplicate`, `canRemove`) come from `BlockActions`, so respect for locked blocks, content-only blocks, and `templateLock` settings is automatic.
 
@@ -158,27 +158,14 @@ The inserter's destination index is computed from the right-clicked block:
 
 The inserter `Popover` uses the same `getCursorAnchor` helper as the right-click menu, so coordinates translate correctly across the iframe boundary.
 
-### Check spelling
+### Reaching the browser's spell-check
 
-`Tools ▸ Check spelling` is enabled when (a) the user has highlighted text inside the right-clicked block, and (b) the right-clicked block declares a RichText-backed `content` attribute (`source: 'html'` or `'rich-text'`). The second gate avoids exposing spell-check on blocks that store their text in another attribute (button `text`, image `caption`, table `body`) — without it, replacements would write a stray `content` attribute the block's save path ignores.
+The custom menu doesn't expose a spell-check item. To reach the browser's native spell-check / "Search …" entries inside `RichText`:
 
-On click:
+-   **Shift + right-click** to skip the custom menu entirely on the first click, or
+-   right-click once to open the custom menu, then **right-click a second time** anywhere — the custom menu closes and the browser's native menu shows in its place.
 
-1.  The right-click menu closes.
-2.  A separate `SpellCheckPopover` opens at the cursor anchor and POSTs the highlighted text to `https://api.languagetool.org/v2/check` (LanguageTool's free public API — no auth, ~20 req/min per IP).
-3.  Each returned match is shown with its short message, an excerpt with the flagged span marked, up to 4 suggested replacements as buttons, and an "Ignore" button.
-4.  Clicking a replacement applies it via `@wordpress/rich-text`'s `insert(value, replacement, start, end)` against a cached snapshot of the block's rich-text value. The match is removed from the list and the remaining matches' offsets are shifted by the length delta so subsequent replacements still target the right characters.
-
-**Offset math.** `create({ element: editable, range })` returns a `RichTextValue` whose `start` is the character offset of the highlight in the block's plain-text view. LanguageTool's `match.offset` is relative to the highlighted text. The absolute offset in the block content is `selectionStartInBlock + match.offset`; the end is `+ match.length`.
-
-**Caching the snapshot.** The popover keeps its own `fullValue` in state and updates it on every replacement, rather than re-reading the iframe DOM each time. The DOM mutates when the block re-renders after `updateBlockAttributes`, and the captured `range`'s container nodes would be stale by the second replacement. Each apply also re-reads the current block attribute as a safety net in case of a concurrent edit — if `replaceEnd` is out of bounds against the current value, the apply is refused.
-
-**Limits / risks.**
-
--   LanguageTool's free API has rate limits (~20 req/min, 20 KB per request). Heavy usage will surface as an error toast.
--   `match.offset` is relative to the plain text sent. If the highlight contains object-replacement characters (inline images, etc.), the offsets may misalign slightly — known limitation, worth knowing.
--   `selectionStartInBlock` assumes the highlight is inside a single block's editable. Cross-block highlights will silently misbehave.
--   We don't snap to a specific block schema attribute name — `content` is hard-coded. The common rich-text blocks (paragraph, heading, list-item, quote, preformatted) all use `content`, but blocks with a different attribute name won't update correctly. Promote this if a real case emerges.
+A prior iteration shipped a `Check spelling` item backed by the public LanguageTool API. It was removed to avoid sending unpublished editor content (drafts, internal notes, embargoed posts, anything pasted into a paragraph) to a hard-coded third-party service with no opt-in or site-admin control.
 
 ### Paragraph-specific items
 
@@ -216,7 +203,6 @@ Note: `BlockToolbarPopover` and other canvas overlays don't hit this gotcha beca
 | `state`            | The main right-click menu (open / closed + capture data).                                                                                                                                |
 | `view`             | Which view the menu renders: `'main'`, `'paste-new-block'`, `'blocks-submenu'`, `'split-block-picker'`, or any fill-namespaced name (e.g. `'table-row-edit'`, `'paragraph-font-color'`). |
 | `inserterState`    | The QuickInserter popover for Add block above / below.                                                                                                                                   |
-| `spellCheckState`  | The LanguageTool suggestions popover.                                                                                                                                                    |
 | `colorPickerState` | The tabbed text-color popover.                                                                                                                                                           |
 
 The main `state` shape:
@@ -232,7 +218,7 @@ The main `state` shape:
 }
 ```
 
-`close()` resets `state` to `null` and `view` to `'main'`. The auxiliary popovers (`inserterState`, `spellCheckState`, `colorPickerState`) are independent — they outlive the menu so the user can interact with them after the menu closes. Each opens by setting its own state and calling `close()` to dismiss the menu. Each is dismissed by Escape, focus-outside, or the next right-click (which resets all auxiliary states inside `handleContextMenu`).
+`close()` resets `state` to `null` and `view` to `'main'`. The auxiliary popovers (`inserterState`, `colorPickerState`) are independent — they outlive the menu so the user can interact with them after the menu closes. Each opens by setting its own state and calling `close()` to dismiss the menu. Each is dismissed by Escape, focus-outside, or the next right-click (which resets all auxiliary states inside `handleContextMenu`).
 
 ### Popover anchor
 
@@ -243,7 +229,6 @@ The anchor object passed to `<Popover anchor={…} />` is rebuilt via `getCursor
 -   `index.js` — main component (handler, state machines, popover, menu items, paragraph fill mount, split-block picker view).
 -   `paste-new-block-submenu.js` — the `Paste as new block` submenu view (Auto / Preformatted / Paragraph / Quote / Table / List / HTML).
 -   `paragraph-fills.js` — fills registered against `BlockContextMenuControls` that surface paragraph-specific formatting items (Bold, Italic, Inline code, Font color…).
--   `spell-check-popover.js` — the LanguageTool suggestions popover invoked by `Tools ▸ Check spelling`.
 -   `text-color-popover.js` — the tabbed Text / Background color picker opened from paragraph's `Font color…` item; replicates the format library's `InlineColorUI` using only `block-editor` primitives.
 -   `use-clipboard-helpers.js` — `useCopyBlocksToClipboard`, `useCopyTextToClipboard`, `usePasteFromClipboard`, `useInlinePasteAtRange`, `usePasteAsBlockType`, plus private `readSystemClipboard` / `writeSystemClipboard` / `insertAtRange` helpers.
 -   `style.scss` — minimal styling (popover width, group spacing).
@@ -272,7 +257,7 @@ Open `http://localhost:8888/wp-admin/post-new.php`, then repeat in the site edit
 7. On a paragraph, highlight a word, then right-click → **Bold / Italic / Inline code** are enabled and toggle the format on the highlight (same markup as the toolbar). **Font color…** opens the tabbed color picker; picking a Text or Background color writes the format inline. Closing the picker (Esc, outside click, next right-click) leaves the format applied.
 8. Highlight a word in a paragraph → **Blocks ▸ Split block ▸** lists the original type + every type the selection can transform into. Picking one splits the paragraph into up to three blocks; whitespace at the joins is trimmed.
 9. Right-click in a table cell → fill items show: **Row edit ▸**, **Column edit ▸**, **Alignment ▸** (with a check on the active alignment), **Show Header Row** / **Show Footer Row** (with a check when on). Each submenu has a Back button.
-10. **Tools ▸ Check spelling** opens the LanguageTool popover (when text is highlighted); **Tools ▸ Edit as HTML** flips the block to HTML mode (label becomes "Edit visually" until flipped back).
+10. **Tools ▸ Edit as HTML** flips the block to HTML mode (label becomes "Edit visually" until flipped back). The menu has no spell-check item; reach the browser's native spell-check via Shift + right-click or a second right-click after the custom menu opens.
 11. **Duplicate**, **Delete Block**, **Paste styles** behave identically to their kebab-menu counterparts; label becomes **Delete Blocks** when targeting multiple blocks.
 12. Group / Lock / Rename / Visibility / Create pattern do **not** appear in the right-click menu (still in the block kebab menu).
 13. Right-click on a locked block (`canRemove === false`) → **Delete Block** is hidden / disabled per `BlockActions` capability flags.
