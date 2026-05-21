@@ -26,6 +26,7 @@ export default function PasteNewBlockSubmenu( {
 	const pasteAuto = usePasteFromClipboard( { mode: 'BLOCKS' } );
 	const pasteAsPreformatted = usePasteAsBlockType( 'core/preformatted' );
 	const pasteAsParagraph = usePasteAsBlockType( 'core/paragraph' );
+	const pasteAsQuote = usePasteAsBlockType( 'core/quote' );
 	const pasteAsTable = usePasteAsBlockType( 'core/table' );
 	const pasteAsList = usePasteAsBlockType( 'core/list' );
 	const pasteAsHTML = usePasteAsBlockType( 'core/html' );
@@ -58,6 +59,9 @@ export default function PasteNewBlockSubmenu( {
 				</MenuItem>
 				<MenuItem onClick={ runAndClose( pasteAsParagraph ) }>
 					{ __( 'Paragraph' ) }
+				</MenuItem>
+				<MenuItem onClick={ runAndClose( pasteAsQuote ) }>
+					{ __( 'Quote' ) }
 				</MenuItem>
 				<MenuItem onClick={ runAndClose( pasteAsTable ) }>
 					{ __( 'Table' ) }

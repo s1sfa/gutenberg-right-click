@@ -16,7 +16,13 @@ import {
 	switchToBlockType,
 } from '@wordpress/blocks';
 import { useDispatch, useSelect } from '@wordpress/data';
-import { useCallback, useEffect, useMemo, useState } from '@wordpress/element';
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { chevronLeft } from '@wordpress/icons';
 import { create, slice, toHTMLString } from '@wordpress/rich-text';
@@ -100,7 +106,9 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 	const [ inserterState, setInserterState ] = useState( null );
 	const [ spellCheckState, setSpellCheckState ] = useState( null );
 	const [ colorPickerState, setColorPickerState ] = useState( null );
-	const { selectBlock, replaceBlock } = useDispatch( blockEditorStore );
+	const popoverRef = useRef( null );
+	const { selectBlock, clearSelectedBlock, replaceBlock } =
+		useDispatch( blockEditorStore );
 	const {
 		getBlock,
 		getBlockRootClientId,
@@ -137,7 +145,14 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 			return undefined;
 		}
 		const doc = state.ownerDocument;
-		function dismiss() {
+		function dismiss( event ) {
+			// In non-iframed editors the popover renders into the same
+			// document as the canvas, so menu-item mousedowns reach this
+			// capture-phase listener before their click can fire. Skip the
+			// dismiss when the event originates inside the popover itself.
+			if ( popoverRef.current?.contains( event.target ) ) {
+				return;
+			}
 			close();
 		}
 		doc.addEventListener( 'mousedown', dismiss, true );
@@ -195,12 +210,25 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 			// and copy-highlighted-text actions, and into per-block fills
 			// (e.g. paragraph formatting) via the BlockContextMenuControls
 			// slot's fillProps.
+			//
+			// Only keep the range if it sits inside the right-clicked block.
+			// Without this guard, the selection from a previously focused
+			// block A could be used by an action targeting block B —
+			// formats would be computed from A and written into B, paste
+			// would land in A's editable, etc.
 			const selection = installedDoc?.getSelection?.();
-			const range =
-				selection && selection.rangeCount > 0
-					? selection.getRangeAt( 0 ).cloneRange()
-					: null;
-			const selectionText = selection ? selection.toString() : '';
+			let range = null;
+			let selectionText = '';
+			if ( selection && selection.rangeCount > 0 ) {
+				const candidate = selection.getRangeAt( 0 );
+				const rangeBlockId = getBlockClientId(
+					candidate.startContainer
+				);
+				if ( rangeBlockId === clientId ) {
+					range = candidate.cloneRange();
+					selectionText = selection.toString();
+				}
+			}
 
 			setView( 'main' );
 			setInserterState( null );
@@ -382,6 +410,25 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 	}, [ splitSlices ] );
 	const canSplitBlock = !! splitSlices;
 
+	// Spell-check writes back through the block's top-level `content`
+	// attribute, so only enable it for single-block targets whose type
+	// declares a RichText-backed `content` attribute (paragraph, heading,
+	// quote, preformatted, list-item, verse, code, …). Blocks that store
+	// their text elsewhere (button `text`, image `caption`, table `body`)
+	// would receive a stray `content` attribute their save path ignores.
+	const canSpellCheckTarget = useMemo( () => {
+		if ( ! state || state.clientIds.length !== 1 ) {
+			return false;
+		}
+		const block = getBlock( state.clientIds[ 0 ] );
+		if ( ! block ) {
+			return false;
+		}
+		const contentSpec = getBlockType( block.name )?.attributes?.content;
+		const source = contentSpec?.source;
+		return source === 'html' || source === 'rich-text';
+	}, [ state, getBlock ] );
+
 	const inserterPopover = inserterState && (
 		<Popover
 			anchor={ inserterAnchor }
@@ -470,8 +517,14 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 		const beforeT = trimRichTextValue( before );
 		const afterT = trimRichTextValue( after );
 
+		// `anchor` is an HTML id and so unique by definition. Keep it on the
+		// first resulting fragment and strip it from the rest so split
+		// pieces don't collide on the same DOM id.
+		const { anchor: _anchor, ...attrsWithoutAnchor } = origAttrs;
+		const hasBefore = beforeT.text.length > 0;
+
 		const middleAsOriginal = createBlock( origName, {
-			...origAttrs,
+			...( hasBefore ? attrsWithoutAnchor : origAttrs ),
 			content: toHTMLString( { value: selectedT } ),
 		} );
 		const middleBlocks =
@@ -483,7 +536,7 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 				  ) || [ middleAsOriginal ];
 
 		const newBlocks = [];
-		if ( beforeT.text.length > 0 ) {
+		if ( hasBefore ) {
 			newBlocks.push(
 				createBlock( origName, {
 					...origAttrs,
@@ -495,7 +548,7 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 		if ( afterT.text.length > 0 ) {
 			newBlocks.push(
 				createBlock( origName, {
-					...origAttrs,
+					...attrsWithoutAnchor,
 					content: toHTMLString( { value: afterT } ),
 				} )
 			);
@@ -532,6 +585,14 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 			}
 		}
 
+		// Clear the selection before the inserter opens. `useInsertionPoint`'s
+		// onInsertBlocks branches to `replaceBlocks` whenever the currently
+		// selected block is an unmodified default paragraph — which is exactly
+		// the case after right-clicking an empty paragraph and choosing
+		// `Add block above/below`. Without this, the inserter would *replace*
+		// the empty paragraph instead of inserting a new sibling.
+		clearSelectedBlock();
+
 		setInserterState( {
 			clientId: targetClientId,
 			rootClientId,
@@ -563,6 +624,7 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 
 	return (
 		<Popover
+			ref={ popoverRef }
 			anchor={ anchor }
 			placement="bottom-start"
 			onClose={ close }
@@ -666,7 +728,9 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 											</MenuItem>
 										) }
 										<MenuItem
-											disabled={ ! canSplitBlock }
+											disabled={
+												! canSplitBlock || ! canRemove
+											}
 											accessibleWhenDisabled
 											onClick={ () =>
 												setView( 'split-block-picker' )
@@ -735,7 +799,10 @@ export default function BlockContextMenu( { __unstableContentRef } ) {
 									</MenuGroup>
 									<MenuGroup label={ __( 'Tools' ) }>
 										<MenuItem
-											disabled={ ! hasTextSelection }
+											disabled={
+												! hasTextSelection ||
+												! canSpellCheckTarget
+											}
 											accessibleWhenDisabled
 											onClick={ openSpellCheck }
 										>

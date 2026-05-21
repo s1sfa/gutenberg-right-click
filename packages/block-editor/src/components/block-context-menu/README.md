@@ -35,13 +35,14 @@ The following items moved out of the right-click menu in favor of leaving space 
 | Auto         | `pasteHandler({ mode: 'BLOCKS' })` — the system chooses the best block type for the clipboard payload.                         |
 | Preformatted | Wraps the clipboard text in a `core/preformatted` block.                                                                       |
 | Paragraph    | Wraps the clipboard text in a `core/paragraph` block.                                                                          |
+| Quote        | Wraps the clipboard text in a `core/quote` block whose single inner `core/paragraph` carries the text.                         |
 | Table        | Splits on newlines for rows, tabs for cells, into a `core/table` block. Falls back to the table block's own empty placeholder. |
 | List         | Splits on newlines into `core/list-item` children of a `core/list` block.                                                      |
 | HTML         | Wraps the clipboard HTML (or plain text) in a `core/html` block.                                                               |
 
 ## Blocks submenu
 
-`Blocks ▸` consolidates block-level operations into a single submenu so the main menu stays short. It contains **Add block above…**, **Add block below…**, **Duplicate**, and **Split block ▸**. Add above/below use the same `QuickInserter` popover described under [`Add block above / Add block below`](#add-block-above--add-block-below). Duplicate uses `BlockActions.onDuplicate`.
+`Blocks ▸` consolidates block-level operations into a single submenu so the main menu stays short. It contains **Add block above…**, **Add block below…**, **Duplicate**, and **Split block ▸**. Add above/below use the `QuickInserter` popover described under [`Add block above / Add block below`](#add-block-above--add-block-below). Duplicate uses `BlockActions.onDuplicate`. **Split block ▸** is disabled when the target block cannot be removed (`canRemove`), since split semantically replaces the original.
 
 ## Split block
 
@@ -153,11 +154,15 @@ The inserter's destination index is computed from the right-clicked block:
 -   **Above** passes `clientId={firstTarget}`. `useInsertionPoint` reads `getBlockIndex(clientId)` for its destination index, so the new block lands at that index and pushes the existing block down — i.e. **before** the right-clicked block.
 -   **Below** passes `clientId={nextSibling(lastTarget)}` so the new block lands at `getBlockIndex(nextSibling) === getBlockIndex(lastTarget) + 1` — i.e. **after** the right-clicked block. When the right-clicked block is last in its parent and has no next sibling, the inserter falls back to `isAppender` with the parent's `rootClientId`, which appends to the end of the parent.
 
+**Selection is cleared before the inserter opens.** `useInsertionPoint`'s `onInsertBlocks` branches to `replaceBlocks` whenever the currently-selected block is an unmodified default paragraph. Right-clicking selects the target, so an empty paragraph target would otherwise be **replaced** by the picked block instead of having a new sibling inserted. Dispatching `clearSelectedBlock()` immediately before `setInserterState` makes `getSelectedBlock()` return `null`, so the inserter takes the plain insert branch.
+
 The inserter `Popover` uses the same `getCursorAnchor` helper as the right-click menu, so coordinates translate correctly across the iframe boundary.
 
 ### Check spelling
 
-`Tools ▸ Check spelling` is enabled when the user has highlighted text inside the right-clicked block. On click:
+`Tools ▸ Check spelling` is enabled when (a) the user has highlighted text inside the right-clicked block, and (b) the right-clicked block declares a RichText-backed `content` attribute (`source: 'html'` or `'rich-text'`). The second gate avoids exposing spell-check on blocks that store their text in another attribute (button `text`, image `caption`, table `body`) — without it, replacements would write a stray `content` attribute the block's save path ignores.
+
+On click:
 
 1.  The right-click menu closes.
 2.  A separate `SpellCheckPopover` opens at the cursor anchor and POSTs the highlighted text to `https://api.languagetool.org/v2/check` (LanguageTool's free public API — no auth, ~20 req/min per IP).
@@ -236,7 +241,7 @@ The anchor object passed to `<Popover anchor={…} />` is rebuilt via `getCursor
 ### Files
 
 -   `index.js` — main component (handler, state machines, popover, menu items, paragraph fill mount, split-block picker view).
--   `paste-new-block-submenu.js` — the `Paste as new block` submenu view (Auto / Preformatted / Paragraph / Table / List / HTML).
+-   `paste-new-block-submenu.js` — the `Paste as new block` submenu view (Auto / Preformatted / Paragraph / Quote / Table / List / HTML).
 -   `paragraph-fills.js` — fills registered against `BlockContextMenuControls` that surface paragraph-specific formatting items (Bold, Italic, Inline code, Font color…).
 -   `spell-check-popover.js` — the LanguageTool suggestions popover invoked by `Tools ▸ Check spelling`.
 -   `text-color-popover.js` — the tabbed Text / Background color picker opened from paragraph's `Font color…` item; replicates the format library's `InlineColorUI` using only `block-editor` primitives.
@@ -259,7 +264,7 @@ npm start               # dev build with watch
 Open `http://localhost:8888/wp-admin/post-new.php`, then repeat in the site editor (`/wp-admin/site-editor.php`, edit a template):
 
 1. Right-click inside a paragraph block → custom menu appears at the cursor; native menu does **not**. Cursor coordinates are correct (no iframe-origin offset).
-2. **Blocks ▸ Add block above…** / **Add block below…** open the QuickInserter so the user can pick a block type before insertion.
+2. **Blocks ▸ Add block above…** / **Add block below…** open the QuickInserter so the user can pick a block type before insertion. Right-clicking an empty default paragraph and choosing "Add block above…" must leave the empty paragraph in place — selection is cleared before the inserter opens precisely so the inserter doesn't replace it.
 3. **Blocks ▸ Duplicate** clones the right-clicked block as the kebab menu does.
 4. Highlight a word inside a paragraph, right-click on the highlight → **Copy Text** is enabled and copies just the highlighted text (paste elsewhere shows only that word). Without a highlight, **Copy Text** is disabled. Multi-select two blocks, right-click → label reads **Copy Blocks**.
 5. Right-click after a Cmd+C → **Paste** inserts the clipboard content **at the caret** in the current block, not as a new block. With rich content, formatting is preserved. With **Paste as plain text**, formatting is dropped.

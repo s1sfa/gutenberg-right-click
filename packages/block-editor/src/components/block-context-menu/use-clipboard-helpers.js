@@ -3,7 +3,12 @@
  */
 import { useCallback } from '@wordpress/element';
 import { useDispatch, useSelect } from '@wordpress/data';
-import { createBlock, pasteHandler, serialize } from '@wordpress/blocks';
+import {
+	createBlock,
+	pasteHandler,
+	serialize,
+	store as blocksStore,
+} from '@wordpress/blocks';
 import { __unstableStripHTML as stripHTML } from '@wordpress/dom';
 import { __ } from '@wordpress/i18n';
 import { store as noticesStore } from '@wordpress/notices';
@@ -12,32 +17,38 @@ import { store as noticesStore } from '@wordpress/notices';
  * Internal dependencies
  */
 import { store as blockEditorStore } from '../../store';
+import { requiresWrapperOnCopy } from '../writing-flow/utils';
 
 async function readSystemClipboard() {
-	if (
-		typeof navigator === 'undefined' ||
-		! navigator.clipboard ||
-		typeof navigator.clipboard.read !== 'function'
-	) {
+	if ( typeof navigator === 'undefined' || ! navigator.clipboard ) {
 		return null;
 	}
 
-	try {
-		const items = await navigator.clipboard.read();
-		let html = '';
-		let plainText = '';
-		for ( const item of items ) {
-			if ( ! html && item.types.includes( 'text/html' ) ) {
-				html = await ( await item.getType( 'text/html' ) ).text();
+	if ( typeof navigator.clipboard.read === 'function' ) {
+		try {
+			const items = await navigator.clipboard.read();
+			let html = '';
+			let plainText = '';
+			for ( const item of items ) {
+				if ( ! html && item.types.includes( 'text/html' ) ) {
+					html = await ( await item.getType( 'text/html' ) ).text();
+				}
+				if ( ! plainText && item.types.includes( 'text/plain' ) ) {
+					plainText = await (
+						await item.getType( 'text/plain' )
+					).text();
+				}
 			}
-			if ( ! plainText && item.types.includes( 'text/plain' ) ) {
-				plainText = await ( await item.getType( 'text/plain' ) ).text();
-			}
+			return { html, plainText };
+		} catch {
+			// Permission denied, or read of HTML not allowed (e.g. some
+			// Firefox configurations). Fall through to readText.
 		}
-		return { html, plainText };
-	} catch {
-		// Permission denied, or read of HTML not allowed (e.g. some Firefox
-		// configurations). Fall back to plain text only.
+	}
+
+	// Browsers that expose only `readText` (older or restricted clipboard
+	// permissions) still give us a useful plain-text paste.
+	if ( typeof navigator.clipboard.readText === 'function' ) {
 		try {
 			const plainText = await navigator.clipboard.readText();
 			return { html: '', plainText };
@@ -45,14 +56,21 @@ async function readSystemClipboard() {
 			return null;
 		}
 	}
+
+	return null;
 }
 
+// `html` may be `null` to publish a plain-text-only payload. Receiving apps
+// that ask for `text/html` then get nothing and have to use `text/plain`,
+// which is the correct contract for plain-text copies — see
+// `useCopyTextToClipboard`.
 async function writeSystemClipboard( html, plainText ) {
 	if ( typeof navigator === 'undefined' || ! navigator.clipboard ) {
 		return false;
 	}
 
 	if (
+		html !== null &&
 		typeof navigator.clipboard.write === 'function' &&
 		typeof window.ClipboardItem === 'function'
 	) {
@@ -129,7 +147,13 @@ function insertAtRange( ownerDocument, range, { html, text } ) {
  * @return {(clientIds: string[]) => Promise<boolean>} Copy callback.
  */
 export function useCopyBlocksToClipboard() {
-	const { getBlocksByClientId } = useSelect( blockEditorStore );
+	const {
+		getBlocksByClientId,
+		getBlockRootClientId,
+		getBlockName,
+		getBlockAttributes,
+	} = useSelect( blockEditorStore );
+	const { getBlockType } = useSelect( blocksStore );
 	const { createErrorNotice } = useDispatch( noticesStore );
 
 	return useCallback(
@@ -138,7 +162,26 @@ export function useCopyBlocksToClipboard() {
 			if ( ! blocks?.length ) {
 				return false;
 			}
-			const html = serialize( blocks );
+			// Mirror the native copy handler: when the first block's type
+			// opts into `requiresWrapperOnCopy` (e.g. `core/list-item`),
+			// copy the wrapping parent block so the paste round-trip keeps
+			// the surrounding list / structure semantics intact.
+			let blocksToCopy = blocks;
+			const firstBlockType = getBlockType( blocks[ 0 ].name );
+			if ( firstBlockType?.[ requiresWrapperOnCopy ] ) {
+				const wrapperClientId = getBlockRootClientId( clientIds[ 0 ] );
+				const wrapperName = wrapperClientId
+					? getBlockName( wrapperClientId )
+					: null;
+				if ( wrapperName ) {
+					blocksToCopy = createBlock(
+						wrapperName,
+						getBlockAttributes( wrapperClientId ),
+						blocks
+					);
+				}
+			}
+			const html = serialize( blocksToCopy );
 			const ok = await writeSystemClipboard( html, toPlainText( html ) );
 			if ( ! ok ) {
 				createErrorNotice(
@@ -148,7 +191,14 @@ export function useCopyBlocksToClipboard() {
 			}
 			return ok;
 		},
-		[ getBlocksByClientId, createErrorNotice ]
+		[
+			getBlocksByClientId,
+			getBlockRootClientId,
+			getBlockName,
+			getBlockAttributes,
+			getBlockType,
+			createErrorNotice,
+		]
 	);
 }
 
@@ -167,7 +217,9 @@ export function useCopyTextToClipboard() {
 			if ( ! text ) {
 				return false;
 			}
-			const ok = await writeSystemClipboard( text, text );
+			// Plain-text copy: omit `text/html` so receiving apps don't parse
+			// a literal selection like `<strong>x</strong>` as markup.
+			const ok = await writeSystemClipboard( null, text );
 			if ( ! ok ) {
 				createErrorNotice(
 					__( 'Unable to copy. Try the keyboard shortcut instead.' ),
@@ -368,13 +420,38 @@ export function usePasteAsBlockType( blockName ) {
 	);
 }
 
+// RichText-backed `content` attributes are parsed as HTML, so a literal
+// pasted `<strong>x</strong>` would be interpreted as markup. Escape the
+// text once here before handing it to any RichText attribute.
+function escapeForRichText( text ) {
+	return ( text || '' )
+		.replace( /&/g, '&amp;' )
+		.replace( /</g, '&lt;' )
+		.replace( />/g, '&gt;' );
+}
+
 function buildBlockOfType( blockName, { html, text } ) {
 	switch ( blockName ) {
 		case 'core/preformatted':
-			return createBlock( 'core/preformatted', { content: text } );
+			return createBlock( 'core/preformatted', {
+				content: escapeForRichText( text ),
+			} );
 		case 'core/paragraph':
-			return createBlock( 'core/paragraph', { content: text } );
+			return createBlock( 'core/paragraph', {
+				content: escapeForRichText( text ),
+			} );
+		case 'core/quote':
+			// Modern Quote stores its content as inner paragraph blocks;
+			// wrap the pasted text in a single paragraph child rather than
+			// the legacy `value` attribute.
+			return createBlock( 'core/quote', {}, [
+				createBlock( 'core/paragraph', {
+					content: escapeForRichText( text ),
+				} ),
+			] );
 		case 'core/html':
+			// HTML block intentionally stores raw HTML; `html || text` keeps
+			// the original (escaping would defeat the point of this block).
 			return createBlock( 'core/html', { content: html || text } );
 		case 'core/list': {
 			const lines = ( text || '' )
@@ -382,7 +459,10 @@ function buildBlockOfType( blockName, { html, text } ) {
 				.map( ( line ) => line.trim() )
 				.filter( Boolean );
 			const items = ( lines.length ? lines : [ text || '' ] ).map(
-				( line ) => createBlock( 'core/list-item', { content: line } )
+				( line ) =>
+					createBlock( 'core/list-item', {
+						content: escapeForRichText( line ),
+					} )
 			);
 			return createBlock( 'core/list', {}, items );
 		}
@@ -396,7 +476,7 @@ function buildBlockOfType( blockName, { html, text } ) {
 				.filter( ( line ) => line.length > 0 )
 				.map( ( line ) => ( {
 					cells: line.split( '\t' ).map( ( cell ) => ( {
-						content: cell.trim(),
+						content: escapeForRichText( cell.trim() ),
 						tag: 'td',
 					} ) ),
 				} ) );
